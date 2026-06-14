@@ -1,41 +1,98 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# ---------------------------------------------------------------------------
+# Dependencies & Package Managers
+# ---------------------------------------------------------------------------
 node_modules/
+.pnpm-store/
+jspm_packages/
+web_modules/
+.yarn/
+.pnp.*
 
-# Expo
+# ---------------------------------------------------------------------------
+# Expo & Bundler Outputs
+# ---------------------------------------------------------------------------
 .expo/
 dist/
 web-build/
+.cache/
+.metro/
+
+# ---------------------------------------------------------------------------
+# Native Build Directories (Expo Prebuild / Continuous Native Generation)
+# ---------------------------------------------------------------------------
+# If you use config plugins, these folders are automatically generated.
+# Un-comment them if you want to commit your native folders to Git.
+/android
+/ios
+
+# ---------------------------------------------------------------------------
+# Logs and Diagnostics
+# ---------------------------------------------------------------------------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# ---------------------------------------------------------------------------
+# Environment Variables & Secrets (CRITICAL FOR SECURITY)
+# ---------------------------------------------------------------------------
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env.json
+
+# ---------------------------------------------------------------------------
+# OS / System Files
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---------------------------------------------------------------------------
+# IDEs, Editors, and Tooling Configuration
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ---------------------------------------------------------------------------
+# Testing & Coverage
+# ---------------------------------------------------------------------------
+coverage/
+.nyc_output/
+
+# Expo Type Definitions
 expo-env.d.ts
 
-# Native
-.kotlin/
-*.orig.*
+# Android Signing / Certificates
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
 
-# Metro
-.metro-health-check*
+# Kotlin
+.kotlin/
 
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# typescript
+# TypeScript Build Cache
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# Metro Health Check
+.metro-health-check*
+
+# Git Merge Backups
+*.orig.*
