@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Fittrack-Temp",
-    "slug": "Fittrack-Temp",
+    "name": "Fittrack",
+    "slug": "fittrack",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

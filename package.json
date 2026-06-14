@@ -1,5 +1,5 @@
 {
-  "name": "fittrack-temp",
+  "name": "fittrack",
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
