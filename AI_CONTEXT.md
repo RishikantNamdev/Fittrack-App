@@ -26,21 +26,30 @@ Environment Setup Complete
 Completed:
 
 * Expo project initialized
+* Expo application runs successfully on Android via Expo Go
 * Project folder structure created
 * Java 17 installed and configured
-* Expo SDK installed
+* Expo SDK 56 installed
 * AI_CONTEXT.md created
 * README.md created
-* MediaPipe selected as pose engine
+* MediaPipe BlazePose selected as pose estimation engine
+* react-native-vision-camera installed
+* Android Studio installed and configured
+* Git repository initialized
+
+In Progress:
+
+Camera integration
 
 Not Started:
 
-* Camera integration
+* Camera preview verification
 * Pose detection
 * Skeleton rendering
 * Rep counting
 * Feedback engine
-* Analytics
+* Workout analytics
+* Local data persistence
 
 ---
 
@@ -170,18 +179,50 @@ exercises.ts
 
 ---
 
+## Decision Log
+* Expo selected over React Native CLI.
+* MediaPipe BlazePose selected for pose estimation.
+* All pose processing must happen on-device.
+* TypeScript is mandatory throughout the project.
+* Physical Android device will be used as the primary testing device.
+* Development will proceed incrementally:
+1. Camera
+2. Pose Detection
+3. Skeleton Overlay
+4. Rep Counting
+5. Form Feedback
+6. Analytics
+* No advanced features should be started until camera integration works reliably.
+* Antigravity agents must generate an implementation plan before modifying files.
+* Simplicity is preferred over abstraction and premature optimization.
+
+---
+
 ## Current Goal
 
-Milestone 1:
+Milestone 1: Camera Verification
 
-1. Verify Expo app runs successfully.
-2. Integrate camera access.
-3. Display live front-camera preview.
+Objectives:
+
+1. Request camera permissions.
+2. Display live front-camera preview.
+3. Verify Vision Camera works with the current Expo setup.
 
 Success Criteria:
 
-- App launches on Android device.
-- Camera permissions granted.
-- Front camera feed visible.
+* App launches on Android device.
+* Camera permission prompt appears.
+* Camera permission can be granted.
+* Front camera preview is visible.
+* No crashes related to Vision Camera.
 
-Nothing else should be built until camera integration works reliably.
+Out of Scope:
+
+* MediaPipe
+* Skia
+* Pose detection
+* Rep counting
+* Exercise tracking
+* Analytics
+
+Nothing else should be built until camera functionality is verified.
