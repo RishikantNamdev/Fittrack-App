@@ -120,12 +120,68 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
         global.totalTime += duration;
         global.inferenceCount++;
 
-        // Log inference metrics every 30 inferences
+        // Access and decode all output buffers
+        const data0 = new Float32Array(outputs[0]); // Identity [1, 195]
+        const data1 = new Float32Array(outputs[1]); // Identity_1 [1, 1]
+        const data2 = new Float32Array(outputs[2]); // Identity_2 [1, 256, 256, 1] (segmentation)
+        const data3 = new Float32Array(outputs[3]); // Identity_3 [1, 64, 64, 39] (heatmaps)
+        const data4 = new Float32Array(outputs[4]); // Identity_4 [1, 117]
+
+        // Log inference metrics and tensor stats every 30 inferences
         if (global.inferenceCount % 30 === 0) {
           const avg = global.totalTime / global.inferenceCount;
           console.log(
             `[TFLite Inference] Success | Inferences: ${global.inferenceCount} | Time: ${duration}ms | Avg: ${avg.toFixed(2)}ms | Outputs: ${outputs.length}`
           );
+          console.log(
+            `[TFLite Decoded] Sizes: data0=${data0.length}, data1=${data1.length}, data2=${data2.length}, data3=${data3.length}, data4=${data4.length}`
+          );
+          
+          const LANDMARK_NAMES: { [key: number]: string } = {
+            0: 'Nose',
+            11: 'Left Shoulder',
+            12: 'Right Shoulder',
+            15: 'Left Wrist',
+            16: 'Right Wrist',
+            23: 'Left Hip',
+            24: 'Right Hip',
+            25: 'Left Knee',
+            26: 'Right Knee',
+          };
+
+          console.log('[TFLite Landmarks] Selected Pose Landmarks (x, y, z, vis, pres):');
+          [0, 11, 12, 15, 16, 23, 24, 25, 26].forEach((idx) => {
+            const offset = idx * 5;
+            if (offset + 4 < data0.length) {
+              const x = data0[offset];
+              const y = data0[offset + 1];
+              const z = data0[offset + 2];
+              const visLogit = data0[offset + 3];
+              const presLogit = data0[offset + 4];
+              const vis = 1 / (1 + Math.exp(-visLogit));
+              const pres = 1 / (1 + Math.exp(-presLogit));
+              console.log(
+                `  ${idx} - ${LANDMARK_NAMES[idx]}: [x=${x.toFixed(2)}, y=${y.toFixed(2)}, z=${z.toFixed(2)}, vis=${vis.toFixed(2)}, pres=${pres.toFixed(2)}]`
+              );
+            }
+          });
+
+          console.log('[TFLite Landmarks] Selected World Landmarks (x_m, y_m, z_m):');
+          [0, 11, 12, 15, 16, 23, 24, 25, 26].forEach((idx) => {
+            const offset = idx * 3;
+            if (offset + 2 < data4.length) {
+              const x = data4[offset];
+              const y = data4[offset + 1];
+              const z = data4[offset + 2];
+              console.log(
+                `  ${idx} - ${LANDMARK_NAMES[idx]}: [x_m=${x.toFixed(3)}, y_m=${y.toFixed(3)}, z_m=${z.toFixed(3)}]`
+              );
+            }
+          });
+
+          // Print data1 value (pose presence flag score)
+          const score = 1 / (1 + Math.exp(-data1[0]));
+          console.log(`[TFLite Decoded] Data1 (Pose score logit=${data1[0]?.toFixed(4)}): [score=${score.toFixed(2)}]`);
         }
 
         // 4. Dispose of buffers immediately to avoid memory leaks
