@@ -70,13 +70,19 @@ Not Started:
 ### 2. Landmark Topology & Mapping
 
 The model outputs **39 landmarks**. 
-* The first **33 landmarks** correspond exactly to the standard **MediaPipe BlazePose topology**:
+* **Indices 0–32:** Correspond exactly to the standard **MediaPipe BlazePose 33-landmark topology**:
   * `0`: Nose
+  * `1–4`: Left eye (inner, eye, outer), Left ear
+  * `5–8`: Right eye (inner, eye, outer), Right ear
+  * `9–10`: Mouth (left, right)
   * `11`: Left Shoulder, `12`: Right Shoulder
+  * `13`: Left Elbow, `14`: Right Elbow
   * `15`: Left Wrist, `16`: Right Wrist
+  * `17–22`: Hand knuckles/fingers (pinky, index, thumb)
   * `23`: Left Hip, `24`: Right Hip
   * `25`: Left Knee, `26`: Right Knee
-* The remaining **6 landmarks** (indices `33-38`) are supplementary alignment points (e.g. hip/shoulder centers, hand/feet alignment points).
+  * `27–32`: Feet/ankles (ankle, heel, toe index)
+* **Indices 33–38:** Marked as **UNKNOWN**. Official MediaPipe/BlazePose public specifications only define landmarks up to index 32. In the raw TFLite model, indices 33–38 represent internal, virtual alignment/tracking reference points (e.g. center of mass or Region of Interest orientation vectors) and should be ignored for standard pose tracking applications.
 
 ### 3. Coordinate Systems & Semantics
 
