@@ -31,6 +31,7 @@ interface PoseCameraProps {
 export function PoseCamera({ isActive }: PoseCameraProps) {
   const { hasPermission, status, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
+  const isFrontCamera = device?.position === 'front';
 
   // -------------------------------------------------------------------------
   // Rendering state — updated from worklet thread every ~33ms (30 fps)
@@ -49,6 +50,13 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
    */
   const [viewWidth, setViewWidth] = useState(0);
   const [viewHeight, setViewHeight] = useState(0);
+  const [frameWidth, setFrameWidth] = useState(0);
+  const [frameHeight, setFrameHeight] = useState(0);
+
+  const setFrameDimensions = useCallback((w: number, h: number) => {
+    setFrameWidth(w);
+    setFrameHeight(h);
+  }, []);
 
   /**
    * Stable layout callback — captures the rendered container dimensions.
@@ -151,6 +159,10 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
       }
 
       global.frameCount++;
+
+      if (global.frameCount === 1) {
+        runOnJS(setFrameDimensions)(frame.width, frame.height);
+      }
 
       if (global.frameCount % 30 === 1) {
         console.log(
@@ -292,6 +304,9 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
         landmarks={landmarks}
         viewWidth={viewWidth}
         viewHeight={viewHeight}
+        frameWidth={frameWidth}
+        frameHeight={frameHeight}
+        isFrontCamera={isFrontCamera}
       />
     </View>
   );

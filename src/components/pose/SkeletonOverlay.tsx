@@ -58,17 +58,23 @@ export interface SkeletonOverlayProps {
   /**
    * Rendered width of the camera container in screen pixels.
    * Measured via the container's onLayout event.
-   * Used to compute the coordinate scale factor: scale = viewWidth / 256.
    */
   viewWidth: number;
 
   /**
    * Rendered height of the camera container in screen pixels.
    * Measured via the container's onLayout event.
-   * Used to compute the vertical crop offset:
-   *   yOffset = (viewHeight - viewWidth) / 2
    */
   viewHeight: number;
+
+  /** Camera frame width (native, landscape). */
+  frameWidth: number;
+
+  /** Camera frame height (native, landscape). */
+  frameHeight: number;
+
+  /** Whether using front camera. */
+  isFrontCamera: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,31 +92,118 @@ export const SkeletonOverlay = React.memo(function SkeletonOverlay({
   landmarks,
   viewWidth,
   viewHeight,
+  frameWidth,
+  frameHeight,
+  isFrontCamera,
 }: SkeletonOverlayProps) {
   // Wait until the container has been measured and landmarks are available
-  if (landmarks.length === 0 || viewWidth === 0 || viewHeight === 0) {
+  if (landmarks.length === 0 || viewWidth === 0 || viewHeight === 0 || frameWidth === 0 || frameHeight === 0) {
     return null;
   }
 
-  // Coordinate transform: BlazePose [0,256] → screen pixels
-  const scale = viewWidth / 256;
-  const yOffset = (viewHeight - viewWidth) / 2;
+  // Calculate geometry values
+  const effectiveFrameWidth = Math.min(frameWidth, frameHeight);
+  const effectiveFrameHeight = Math.max(frameWidth, frameHeight);
+  const viewRatio = viewWidth / viewHeight;
+  const frameRatio = effectiveFrameWidth / effectiveFrameHeight;
+
+  let previewWidth = viewWidth;
+  let previewHeight = viewHeight;
+  let xOffset = 0;
+  let yOffset = 0;
+
+  if (viewRatio < frameRatio) {
+    previewHeight = viewHeight;
+    previewWidth = viewHeight * frameRatio;
+    xOffset = (viewWidth - previewWidth) / 2;
+  } else {
+    previewWidth = viewWidth;
+    previewHeight = viewWidth / frameRatio;
+    yOffset = (viewHeight - previewHeight) / 2;
+  }
+
+  // Debug log every 1000ms
+  const lastLogRef = React.useRef(0);
+  const now = Date.now();
+  const scale = previewWidth / 256;
+  const cropYOffset = (previewHeight - previewWidth) / 2;
+
+  if (now - lastLogRef.current > 1000) {
+    lastLogRef.current = now;
+    console.log('[GEOMETRY DEBUG] details:', JSON.stringify({
+      frameWidth,
+      frameHeight,
+      viewWidth,
+      viewHeight,
+      effectiveFrameWidth,
+      effectiveFrameHeight,
+      previewWidth,
+      previewHeight,
+      xOffset,
+      yOffset,
+      isFrontCamera,
+      scale,
+      cropYOffset,
+    }, null, 2));
+
+    const nose = landmarks[0];
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+    if (nose && leftShoulder && rightShoulder) {
+      const noseXScreen = nose.x * scale + xOffset;
+      const noseYScreen = nose.y * scale + cropYOffset + yOffset;
+      const leftShXScreen = leftShoulder.x * scale + xOffset;
+      const leftShYScreen = leftShoulder.y * scale + cropYOffset + yOffset;
+      const rightShXScreen = rightShoulder.x * scale + xOffset;
+      const rightShYScreen = rightShoulder.y * scale + cropYOffset + yOffset;
+
+      console.log('[GEOMETRY DEBUG] transformed coordinates:', JSON.stringify({
+        nose: {
+          x_model: nose.x,
+          y_model: nose.y,
+          x_screen: noseXScreen,
+          y_screen: noseYScreen,
+          left_position: isFrontCamera ? (viewWidth - noseXScreen) : noseXScreen,
+        },
+        leftShoulder: {
+          x_model: leftShoulder.x,
+          y_model: leftShoulder.y,
+          x_screen: leftShXScreen,
+          y_screen: leftShYScreen,
+          left_position: isFrontCamera ? (viewWidth - leftShXScreen) : leftShXScreen,
+        },
+        rightShoulder: {
+          x_model: rightShoulder.x,
+          y_model: rightShoulder.y,
+          x_screen: rightShXScreen,
+          y_screen: rightShYScreen,
+          left_position: isFrontCamera ? (viewWidth - rightShXScreen) : rightShXScreen,
+        }
+      }, null, 2));
+    }
+  }
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {landmarks.map((lm) => (
-        <View
-          key={lm.index}
-          style={[
-            styles.joint,
-            {
-              // Center the circle on the landmark position
-              left: lm.x * scale - JOINT_RADIUS,
-              top: lm.y * scale + yOffset - JOINT_RADIUS,
-            },
-          ]}
-        />
-      ))}
+      {landmarks.map((lm) => {
+        const xScreen = lm.x * scale + xOffset;
+        const yScreen = lm.y * scale + cropYOffset + yOffset;
+        const leftPosition = isFrontCamera ? (viewWidth - xScreen) : xScreen;
+
+        return (
+          <View
+            key={lm.index}
+            style={[
+              styles.joint,
+              {
+                // Center the circle on the landmark position
+                left: leftPosition - JOINT_RADIUS,
+                top: yScreen - JOINT_RADIUS,
+              },
+            ]}
+          />
+        );
+      })}
     </View>
   );
 });

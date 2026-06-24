@@ -21,7 +21,7 @@ No server-side video processing is allowed.
 ## Current Development Stage
 
 Current Phase:
-Milestone 2C Complete (Landmark Parser Implementation)
+Milestone 3A Complete (Skeleton Rendering Foundation)
 
 Completed:
 
@@ -40,14 +40,15 @@ Completed:
 * **Milestone 2A: TFLite model execution validation** (Completed)
 * **Milestone 2B: Landmark decoding validation** (Completed)
 * **Milestone 2C: Landmark Parser Implementation** (Completed)
+* **Milestone 3A: Skeleton Rendering Foundation (Joint Circles)** (Completed)
 
 In Progress:
 
-* Ready for next phase (Skeleton Rendering — Milestone 3)
+* Ready for next phase (Skeleton Bones — Milestone 3B)
 
 Not Started:
 
-* Skeleton overlay rendering (Milestone 3)
+* Skeleton bones rendering (Milestone 3B)
 * Rep counting (Milestone 4)
 * Feedback engine (Milestone 5)
 * Workout analytics (Milestone 6)
@@ -487,34 +488,42 @@ React JS Thread
 
 Inputs: `landmark.x`, `landmark.y` in [0, 256] pixel-space (runtime-verified).
 
+**Aspect Ratio Crop (1:1):**
+The GPU resizer uses `scaleMode: 'cover'`, cropping the centered square region `Math.min(w, h) × Math.min(w, h)` (720x720) out of the upright camera frame (720x1280) and scaling it down to 256x256.
+
+**Preview Scaling & Offsets:**
+The camera preview fills the screen container (`viewWidth` × `viewHeight`) using `"cover"` mode. 
+Since `viewRatio < frameRatio` (tall portrait aspect ratio), the preview matches screen height (`previewHeight = viewHeight`) and extends horizontally past the screen width (`previewWidth = viewHeight * frameRatio`).
+This introduces:
+- Scale factor: `scale = previewWidth / 256`
+- Horizontal offset: `xOffset = (viewWidth - previewWidth) / 2`
+- Vertical crop offset inside the 9:16 preview: `cropYOffset = (previewHeight - previewWidth) / 2`
+- Vertical container offset: `yOffset = 0` (or `(viewHeight - previewHeight) / 2` if viewRatio >= frameRatio)
+
+**Coordinate Transformation Equations:**
 ```
-scale    = viewWidth / 256           // viewWidth from container onLayout
-x_screen = landmark.x * scale
-y_screen = landmark.y * scale + (viewHeight - viewWidth) / 2
+x_screen = landmark.x * scale + xOffset
+y_screen = landmark.y * scale + cropYOffset + yOffset
 ```
 
-**Why `(viewHeight - viewWidth) / 2`:**
-The GPU resizer uses `scaleMode: 'cover'`, which produces a 256×256 square
-center-crop of the landscape camera frame. The camera preview fills a portrait
-container (height > width). The 256-pixel-tall crop maps to `viewWidth` pixels
-on screen (since scale = viewWidth/256). The remaining vertical space above and
-below the crop is `(viewHeight - viewWidth)`, split equally as a top/bottom offset.
-
-**No horizontal mirroring required:**
-Vision Camera mirrors both the preview surface and the frame processor input
-horizontally on Android for front-camera, so model-space left = screen left.
+**Front-Camera Mirroring:**
+The front-facing camera preview is mirrored horizontally for display, while the frame processor works on raw, non-mirrored coordinates. To align the overlay with the mirrored preview, we perform horizontal mirroring:
+```
+left_position = viewWidth - x_screen
+```
 
 ### 4. SkeletonOverlay Component Responsibilities (Milestone 3A)
 
 | Responsibility | Implementation |
 |---|---|
 | Accept 33 landmarks | `landmarks: PoseLandmark[]` prop |
-| Accept container size | `viewWidth`, `viewHeight` props (measured via onLayout) |
-| Transform coordinates | `scale = viewWidth/256`, `yOffset = (viewHeight-viewWidth)/2` |
+| Accept container & frame size | `viewWidth`, `viewHeight`, `frameWidth`, `frameHeight` props |
+| Accept camera configuration | `isFrontCamera` prop |
+| Transform coordinates | `scale = previewWidth / 256`, accounting for cover crops, offsets, and mirroring |
 | Render joint circles | 33 absolute-positioned `View` with `borderRadius` |
 | Prevent stale renders | `React.memo` (re-renders only when `landmarks` reference changes) |
 | Camera interactivity | `pointerEvents="none"` on overlay container |
-| Guard empty state | Returns `null` if `landmarks.length === 0` or dimensions not measured |
+| Guard empty state | Returns `null` if landmarks or dimensions are unmeasured |
 
 ### 5. Milestone 3A Scope Restrictions
 
