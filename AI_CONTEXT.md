@@ -21,12 +21,12 @@ No server-side video processing is allowed.
 ## Current Development Stage
 
 Current Phase:
-Milestone 2B Complete (Landmark Decoding Validation)
+Milestone 2C Complete (Skeleton Rendering Validation)
 
 Completed:
 
 * Expo project initialized
-* Expo application runs successfully on Android via Expo Go
+* Expo application runs successfully on Android via custom development client
 * Project folder structure created
 * Java 17 installed and configured
 * Expo SDK 56 installed
@@ -39,78 +39,79 @@ Completed:
 * **Milestone 1: Camera verification & preview** (Completed)
 * **Milestone 2A: TFLite model execution validation** (Completed)
 * **Milestone 2B: Landmark decoding validation** (Completed)
+* **Milestone 2C: Skeleton rendering validation** (Completed)
 
 In Progress:
 
-* Preparing for **Milestone 2C: Landmark Parser Implementation**
+* Ready for next phase (Exercise Analysis / Rep Counting)
 
 Not Started:
 
-* Skeleton rendering (Milestone 3)
-* Rep counting (Milestone 4)
+* Rep counting (Milestone 3 / 4)
 * Feedback engine (Milestone 5)
 * Workout analytics (Milestone 6)
 * Local data persistence (Milestone 7)
 
 ---
 
-## Milestone 2: Model Execution & Landmark Decoding Specifications
+## Milestone 2C: Skeleton Rendering Validation Specifications
 
-### 1. Validated Tensor Structures
+### 1. Rendering Architecture
 
-* **Input Tensor:**
-  * `input_1` (`float32`, shape `[1, 256, 256, 3]`): Interleaved RGB image resized to 256x256 pixels, values scaled to `[0.0, 1.0]` or standard normalized float range.
-* **Output Tensors:**
-  * `Identity` (`float32`, shape `[1, 195]`): Pixel-space pose landmarks. 39 landmarks × 5 values (`x`, `y`, `z`, `visibility_logit`, `presence_logit`).
-  * `Identity_1` (`float32`, shape `[1, 1]`): Pose presence confidence score logit.
-  * `Identity_2` (`float32`, shape `[1, 256, 256, 1]`): Segmentation mask.
-  * `Identity_3` (`float32`, shape `[1, 64, 64, 39]`): Heatmap grids.
-  * `Identity_4` (`float32`, shape `[1, 117]`): Metric world landmarks. 39 landmarks × 3 values (`x_meters`, `y_meters`, `z_meters`).
+*   **Thread Execution:** Synchronous execution of inference (`tflite.runSync`) and coordinate decoding directly on the frame processor (worklet) thread.
+*   **JS Main Thread Sync:** Normalized decoded coordinate coordinates are transferred to the main JS thread using the worklet JSI `runOnJS` wrapper.
+*   **UI Layer:** The overlay is implemented using standard absolute-positioned React Native `View` components:
+    *   **Joints:** Rendered as 10px circular `View` elements with Emerald Green background and white borders.
+    *   **Bones:** Rendered as 3px lines with Sleek Indigo background, scaled and rotated dynamically using trigonometry (angle/length calculations) on the JS thread.
 
-### 2. Landmark Topology & Mapping
+### 2. Coordinate Transform Pipeline
 
-The model outputs **39 landmarks**. 
-* **Indices 0–32:** Correspond exactly to the standard **MediaPipe BlazePose 33-landmark topology**:
-  * `0`: Nose
-  * `1–4`: Left eye (inner, eye, outer), Left ear
-  * `5–8`: Right eye (inner, eye, outer), Right ear
-  * `9–10`: Mouth (left, right)
-  * `11`: Left Shoulder, `12`: Right Shoulder
-  * `13`: Left Elbow, `14`: Right Elbow
-  * `15`: Left Wrist, `16`: Right Wrist
-  * `17–22`: Hand knuckles/fingers (pinky, index, thumb)
-  * `23`: Left Hip, `24`: Right Hip
-  * `25`: Left Knee, `26`: Right Knee
-  * `27–32`: Feet/ankles (ankle, heel, toe index)
-* **Indices 33–38:** Marked as **UNKNOWN**. Official MediaPipe/BlazePose public specifications only define landmarks up to index 32. In the raw TFLite model, indices 33–38 represent internal, virtual alignment/tracking reference points (e.g. center of mass or Region of Interest orientation vectors) and should be ignored for standard pose tracking applications.
+*   **Aspect Ratio Crop (1:1):** The resizer uses `scaleMode: 'cover'` to crop and resize input frames to `256x256` square formats, centered on the camera feed.
+*   **Scale Factor:** The screen scale factor is calculated as `scale = viewportWidth / 256`.
+*   **Viewport Translation:**
+    *   `x_screen = lx * scale`
+    *   `y_screen = ly * scale + (viewportHeight - viewportWidth) / 2`
+    *(Aligns the centered square crop to the viewport bounds of the portrait device)*
+*   **Horizontal Mirroring:** Front-camera coordinates map natively to the screen without horizontal inversion because both the input frames to the frame processor and the preview surface display are horizontally mirrored on Android.
 
-### 3. Coordinate Systems & Semantics
+### 3. Skeleton Connection Map (35 Bones)
 
-* **Pixel-Space Landmarks (`Identity` / `data0`):**
-  * `x`, `y`: Coordinates scaled in pixel range `[0, 256]` corresponding to the input frame bounding box. `y = 0` represents the top of the frame, and `y = 256` represents the bottom.
-  * `z`: Relative depth coordinate (same scale as x/y).
-  * `visibility_logit`, `presence_logit`: Passed through a standard Sigmoid function `1 / (1 + exp(-logit))` to yield confidence scores in `[0.0, 1.0]`.
-* **World Landmarks (`Identity_4` / `data4`):**
-  * `x_meters`, `y_meters`, `z_meters`: Real-world coordinates in meters.
-  * **Origin:** Midpoint of the left and right hip landmarks.
-  * **Directions:** `y` points downwards (negative `y` is above hips, e.g. shoulders/nose), `x` points to the person's left (screen-right), `z` points relative to the hip center.
-* **Pose Score (`Identity_1` / `data1`):**
-  * Passed through Sigmoid to represent the probability `[0.0, 1.0]` of a human pose being present.
+The connection map connects standard BlazePose landmarks 0-32, completely ignoring virtual/alignment landmarks 33-38:
+*   **Face/Head (9 connections):**
+    *   Left eye path: `[0, 1]`, `[1, 2]`, `[2, 3]`, `[3, 7]` (Nose $\rightarrow$ Inner $\rightarrow$ Eye $\rightarrow$ Outer $\rightarrow$ Ear)
+    *   Right eye path: `[0, 4]`, `[4, 5]`, `[5, 6]`, `[6, 8]`
+    *   Mouth path: `[9, 10]`
+*   **Torso (4 connections):**
+    *   Shoulders: `[11, 12]`
+    *   Hips: `[23, 24]`
+    *   Left Torso: `[11, 23]` (Shoulder to Hip)
+    *   Right Torso: `[12, 24]` (Shoulder to Hip)
+*   **Left Arm (6 connections):**
+    *   `[11, 13]`, `[13, 15]`, `[15, 17]`, `[15, 19]`, `[15, 21]`, `[17, 19]`
+*   **Right Arm (6 connections):**
+    *   `[12, 14]`, `[14, 16]`, `[16, 18]`, `[16, 20]`, `[16, 22]`, `[18, 20]`
+*   **Left Leg (5 connections):**
+    *   `[23, 25]`, `[25, 27]`, `[27, 29]`, `[29, 31]`, `[27, 31]`
+*   **Right Leg (5 connections):**
+    *   `[24, 26]`, `[26, 28]`, `[28, 30]`, `[30, 32]`, `[28, 32]`
 
-### 4. Inference Performance Metrics
+### 4. Performance Measurements
 
-* **Delegate:** GPU Delegate via OpenCL (`TfLiteGpuDelegateV2`) replacing all 332 node operations.
-* **Execution Time:** **~21.50ms** average per inference (between 16ms and 32ms), well within the 33.3ms budget for 30 FPS processing.
-* **UI Responsiveness:** 100% responsive, frame processing operates completely off the JS main thread in the C++ worklet runtime.
+*   **Camera Frame Rate:** **30.6 FPS**
+*   **Inference Execution Rate:** **30.4 FPS**
+*   **Overlay Rendering Rate:** **29.7 FPS**
+*   **Average JSI Latency:** **16ms** (model GPU inference + resizer resize)
+*   **Dropped Frames / Lag:** **0%** dropped frames. UI remains 100% responsive.
 
-### 5. Lessons Learned & Limitations
+### 5. Validation Findings
 
-* **Worklet Caching:** React Native Worklet runtimes are persisted by the native C++ wrapper. Code updates inside `onFrame` may not load via Metro hot-reload and require a full `adb shell am force-stop` to invalidate the native cache.
-* **SDK Compatibility:** Overriding `minSdkVersion = 26` in `android/build.gradle` is strictly required to prevent JNI crashes during hardware buffer allocations inside the resizer module.
+*   **Test A (Standing Still):** Skeleton overlays match human body posture. Connections align exactly with the shoulders, torso, arms, and legs.
+*   **Test B (Raise Left Arm):** The skeleton correctly tracks the left arm moving upwards. The line rotates dynamically and coordinates map to the right side of the screen as expected in a mirrored view.
+*   **Test C (Raise Right Arm):** Right arm tracks correctly and rotates dynamically.
+*   **Test D (Squat):** Torso and leg connections dynamically compress/expand with the hips, knees, and ankles. The joints remain attached to the correct anatomical points.
+*   **Test E (Step Sideways):** Horizontal translation maps across the screen. Joints remain stable.
+*   *Verdict:* No coordinate inversion, mirroring, or layout offset issues are present.
 
----
-
-## Tech Stack
 
 Frontend:
 
