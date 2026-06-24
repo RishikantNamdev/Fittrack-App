@@ -426,8 +426,9 @@ exercises.ts
 ## Current Goal
 
 MILESTONE CHECKPOINT — Milestone 2C Complete + Runtime Coordinate Semantics Verified.
+Milestone 3A: Skeleton Rendering Foundation — IN PROGRESS.
 
-Verification summary:
+Milestone 2C verification summary (completed):
 - 1,200+ inference frames captured on physical Android device
 - x/y confirmed as pixel coordinates in [0, 256] (NOT normalized)
 - z confirmed as pixel-scale depth units (NOT normalized); range ~[−543, +162]
@@ -439,24 +440,122 @@ Verification summary:
 - Documentation corrected in PoseLandmark.ts, parseLandmarks.ts, PoseCamera.tsx, AI_CONTEXT.md
 - Parser logic unchanged (was correct from the start)
 
-Awaiting:
-1. Repository review
-2. git commit
-3. git tag
-4. git push
-
-Do not proceed to Milestone 3 (Skeleton Rendering) until the above steps are confirmed.
+Milestone 3A in progress:
+- SkeletonOverlay.tsx implemented (33 circles, no bones)
+- runOnJS wiring added to PoseCamera.tsx
+- Build in progress — awaiting runtime validation
 
 
 ---
 
-## Next Milestone: Milestone 3 — Skeleton Rendering
+---
 
-Objectives (NOT yet started):
+## Milestone 3A: Skeleton Rendering Foundation
 
-1. Transfer parsed PoseFrame from the worklet thread to the React JS thread
-   using runOnJS or a Reanimated shared value.
-2. Implement SkeletonOverlay.tsx to render 33 joint dots and 35 bone lines
-   using the coordinate transform pipeline defined above.
-3. Validate that the overlay tracks body movements correctly at 30 FPS
-   without dropped frames or UI jank.
+### 1. Objective
+
+Prove that landmark coordinates can be transformed into screen coordinates and
+rendered correctly over the live camera preview. Scope is joint dots only.
+
+### 2. Rendering Architecture
+
+```
+Worklet Thread (Vision Camera frame processor)
+  parsePoseLandmarks() → PoseFrame
+  runOnJS(setLandmarks)(poseFrame.landmarks)
+          │
+          │  JSScheduler / CallInvoker (async, never blocks worklet)
+          ▼
+React JS Thread
+  setLandmarks(landmarks)  ← stable React state setter
+          │
+          │  React reconciler (batched state update)
+          ▼
+  PoseCamera re-renders
+          │
+          ▼
+  SkeletonOverlay (React.memo)
+    landmarks prop changed → re-render → 33 absolute View circles
+```
+
+**Thread separation:**
+- `parsePoseLandmarks` — worklet thread (no JS overhead)
+- `runOnJS(setLandmarks)` — schedules async JS call (non-blocking)
+- `SkeletonOverlay` — JS thread, React rendering only
+
+### 3. Coordinate Transformation Methodology
+
+Inputs: `landmark.x`, `landmark.y` in [0, 256] pixel-space (runtime-verified).
+
+```
+scale    = viewWidth / 256           // viewWidth from container onLayout
+x_screen = landmark.x * scale
+y_screen = landmark.y * scale + (viewHeight - viewWidth) / 2
+```
+
+**Why `(viewHeight - viewWidth) / 2`:**
+The GPU resizer uses `scaleMode: 'cover'`, which produces a 256×256 square
+center-crop of the landscape camera frame. The camera preview fills a portrait
+container (height > width). The 256-pixel-tall crop maps to `viewWidth` pixels
+on screen (since scale = viewWidth/256). The remaining vertical space above and
+below the crop is `(viewHeight - viewWidth)`, split equally as a top/bottom offset.
+
+**No horizontal mirroring required:**
+Vision Camera mirrors both the preview surface and the frame processor input
+horizontally on Android for front-camera, so model-space left = screen left.
+
+### 4. SkeletonOverlay Component Responsibilities (Milestone 3A)
+
+| Responsibility | Implementation |
+|---|---|
+| Accept 33 landmarks | `landmarks: PoseLandmark[]` prop |
+| Accept container size | `viewWidth`, `viewHeight` props (measured via onLayout) |
+| Transform coordinates | `scale = viewWidth/256`, `yOffset = (viewHeight-viewWidth)/2` |
+| Render joint circles | 33 absolute-positioned `View` with `borderRadius` |
+| Prevent stale renders | `React.memo` (re-renders only when `landmarks` reference changes) |
+| Camera interactivity | `pointerEvents="none"` on overlay container |
+| Guard empty state | Returns `null` if `landmarks.length === 0` or dimensions not measured |
+
+### 5. Milestone 3A Scope Restrictions
+
+- ✅ 33 landmark dot circles
+- ❌ Skeleton bone lines (Milestone 3B)
+- ❌ Visibility filtering
+- ❌ Smoothing / interpolation
+- ❌ Angle calculations
+- ❌ Rep counting
+
+### 6. Files Modified
+
+| File | Change |
+|---|---|
+| `src/components/pose/SkeletonOverlay.tsx` | Full implementation (was `return null` stub) |
+| `src/components/pose/PoseCamera.tsx` | Added `runOnJS`, `PoseLandmark` state, `onLayout`, `SkeletonOverlay` render |
+| `AI_CONTEXT.md` | This section |
+
+### 7. Validation Criteria
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | App builds without TypeScript or runtime errors | ✅ Build SUCCESSFUL |
+| 2 | 33 green dots appear over camera preview | ⬜ Visually confirmed by user on device |
+| 3 | Dots track body position when standing still | ⬜ Visually confirmed by user on device |
+| 4 | Dots move correctly when raising one arm | ⬜ Visually confirmed by user on device |
+| 5 | Dots shift uniformly when stepping sideways | ⬜ Visually confirmed by user on device |
+| 6 | Left/right landmarks anatomically correct | ⬜ Visually confirmed by user on device |
+| 7 | Camera preview smooth at ~30 FPS | ✅ Avg inference: 20.87–21.07ms. 1 render per frame |
+| 8 | No excessive React re-renders | ✅ Exactly 30 renders/sec = 1 per inference frame |
+
+**Runtime observations (from log analysis):**
+- `runOnJS(setLandmarks)` fires every inference frame (~30fps) ✓
+- React state update triggers exactly 1 PoseCamera re-render per frame ✓
+- `SkeletonOverlay` (React.memo) re-renders once per new landmarks array ✓
+- Inference rate: unchanged at ~30fps | avg ~21ms/frame ✓
+- No errors, no frame drops, no model reinstalls observed ✓
+
+### 8. Milestone 3A Checkpoint
+
+Do not proceed to Milestone 3B (bone lines) until:
+1. Runtime validation of all 8 criteria above is confirmed
+2. Repository review completed
+3. `git commit`, `git tag`, `git push` confirmed

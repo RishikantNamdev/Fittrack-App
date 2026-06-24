@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { StyleSheet, Text, View, Button, Linking, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { LayoutChangeEvent, StyleSheet, Text, View, Button, Linking, ActivityIndicator } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission, useFrameOutput } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { createResizer } from 'react-native-vision-camera-resizer';
 import { NitroModules } from 'react-native-nitro-modules';
+import { runOnJS } from 'react-native-worklets';
 import { parsePoseLandmarks } from '../../pose/parseLandmarks';
-import type { PoseFrame } from '../../pose/PoseLandmark';
+import type { PoseFrame, PoseLandmark } from '../../pose/PoseLandmark';
+import { SkeletonOverlay } from './SkeletonOverlay';
 
 // ---------------------------------------------------------------------------
 // Landmark indices logged during validation. Chosen to cover the full body:
@@ -29,6 +31,34 @@ interface PoseCameraProps {
 export function PoseCamera({ isActive }: PoseCameraProps) {
   const { hasPermission, status, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
+
+  // -------------------------------------------------------------------------
+  // Rendering state — updated from worklet thread every ~33ms (30 fps)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Latest set of 33 body landmarks transferred from the worklet thread via
+   * runOnJS. Updated on every inference frame. Drives SkeletonOverlay renders.
+   */
+  const [landmarks, setLandmarks] = useState<PoseLandmark[]>([]);
+
+  /**
+   * Camera container dimensions, measured once via the container's onLayout
+   * event. Used by SkeletonOverlay to compute the coordinate scale factor
+   * (scale = viewWidth / 256) and the vertical crop offset.
+   */
+  const [viewWidth, setViewWidth] = useState(0);
+  const [viewHeight, setViewHeight] = useState(0);
+
+  /**
+   * Stable layout callback — captures the rendered container dimensions.
+   * useCallback with empty deps is correct: setViewWidth and setViewHeight
+   * are stable React state setters that never change reference.
+   */
+  const handleLayout = useCallback((e: LayoutChangeEvent) => {
+    setViewWidth(e.nativeEvent.layout.width);
+    setViewHeight(e.nativeEvent.layout.height);
+  }, []);
 
   // Load the BlazePose model (android-gpu delegate for hardware acceleration)
   const model = useTensorflowModel(
@@ -101,8 +131,9 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
   //   3. Run TFLite inference synchronously (runSync)
   //   4. Wrap raw output buffers in Float32Array views (no data copy)
   //   5. Parse outputs[0] + outputs[1] into a typed PoseFrame
-  //   6. Log structured landmark data every 30 frames for validation
-  //   7. Dispose GPU frame to release native memory
+  //   6. Transfer landmarks to JS thread via runOnJS → triggers SkeletonOverlay render
+  //   7. Log structured landmark data every 30 frames for validation
+  //   8. Dispose GPU frame to release native memory
   //
   // outputs[2] (segmentation mask) and outputs[3] (heatmaps) are not
   // consumed in this milestone and are intentionally left unwrapped.
@@ -165,7 +196,14 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
         // 5. Parse raw tensor data into a typed PoseFrame (landmarks 0–32 only)
         const poseFrame: PoseFrame = parsePoseLandmarks(data0, data1[0], start);
 
-        // 6. Structured validation log every 30 inferences
+        // 6. Transfer landmarks to the React Native JS thread for rendering.
+        //    runOnJS schedules setLandmarks to run asynchronously on the JS thread
+        //    via the JSScheduler / CallInvoker (never blocks the worklet thread).
+        //    setLandmarks is a stable React state setter — no closure staleness risk.
+        //    Each call triggers a SkeletonOverlay re-render with the latest frame data.
+        runOnJS(setLandmarks)(poseFrame.landmarks);
+
+        // 7. Structured validation log every 30 inferences
         if (global.inferenceCount % 30 === 0) {
           const avg = global.totalTime / global.inferenceCount;
           console.log(
@@ -183,7 +221,7 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
           });
         }
 
-        // 7. Release GPU frame to avoid native memory leak
+        // 8. Release GPU frame to avoid native memory leak
         resized.dispose();
       } catch (err: any) {
         console.error('[TFLite Inference] Error during execution:', err.message);
@@ -238,15 +276,22 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
     );
   }
 
-  // Active camera preview with frame outputs attached
+  // Active camera preview with landmark overlay (Milestone 3A)
   return (
-    <View style={styles.cameraContainer}>
+    <View style={styles.cameraContainer} onLayout={handleLayout}>
       <Camera
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={isActive}
         onError={(error) => console.error('VisionCamera Error:', error)}
         outputs={[frameOutput]}
+      />
+      {/* Milestone 3A: 33 landmark joint dots positioned over the camera preview.
+           Coordinate transform: scale = viewWidth/256, yOffset = (h-w)/2        */}
+      <SkeletonOverlay
+        landmarks={landmarks}
+        viewWidth={viewWidth}
+        viewHeight={viewHeight}
       />
     </View>
   );
