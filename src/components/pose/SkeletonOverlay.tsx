@@ -26,7 +26,7 @@
  */
 
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
 import type { PoseLandmark } from '../../pose/PoseLandmark';
 
 // ---------------------------------------------------------------------------
@@ -42,6 +42,80 @@ const JOINT_COLOR = '#10B981';
 
 const JOINT_BORDER_COLOR = '#ffffff';
 const JOINT_BORDER_WIDTH = 1.5;
+
+// ---------------------------------------------------------------------------
+// Bone Connections & Helper for Temporary Diagnostic Visualization
+// ---------------------------------------------------------------------------
+const BONE_CONNECTIONS = [
+  // Face
+  [0, 2], // nose ↔ left eye
+  [0, 5], // nose ↔ right eye
+  [2, 7], // left eye ↔ left ear
+  [5, 8], // right eye ↔ right ear
+
+  // Torso
+  [11, 12], // left shoulder ↔ right shoulder
+  [11, 23], // left shoulder ↔ left hip
+  [12, 24], // right shoulder ↔ right hip
+  [23, 24], // left hip ↔ right hip
+
+  // Left arm
+  [11, 13], // shoulder → elbow
+  [13, 15], // elbow → wrist
+  [15, 19], // wrist → index
+  [15, 17], // wrist → pinky
+  [15, 21], // wrist → thumb
+
+  // Right arm
+  [12, 14], // shoulder → elbow
+  [14, 16], // elbow → wrist
+  [16, 20], // wrist → index
+  [16, 18], // wrist → pinky
+  [16, 22], // wrist → thumb
+
+  // Left leg
+  [23, 25], // hip → knee
+  [25, 27], // knee → ankle
+  [27, 29], // ankle → heel
+  [29, 31], // heel → foot index
+
+  // Right leg
+  [24, 26], // hip → knee
+  [26, 28], // knee → ankle
+  [28, 30], // ankle → heel
+  [30, 32], // heel → foot index
+];
+
+function renderBone(
+  key: string,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  thickness = 1.5,
+  color = '#4F46E5' // Indigo
+) {
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+
+  return (
+    <View
+      key={key}
+      style={{
+        position: 'absolute',
+        left: cx - length / 2,
+        top: cy - thickness / 2,
+        width: length,
+        height: thickness,
+        backgroundColor: color,
+        transform: [{ rotate: `${angle}rad` }],
+      }}
+      pointerEvents="none"
+    />
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,7 +175,7 @@ export const SkeletonOverlay = React.memo(function SkeletonOverlay({
     return null;
   }
 
-  // Calculate geometry values
+  // Calculate geometry values for contain-mode camera preview
   const effectiveFrameWidth = Math.min(frameWidth, frameHeight);
   const effectiveFrameHeight = Math.max(frameWidth, frameHeight);
   const viewRatio = viewWidth / viewHeight;
@@ -109,96 +183,106 @@ export const SkeletonOverlay = React.memo(function SkeletonOverlay({
 
   let previewWidth = viewWidth;
   let previewHeight = viewHeight;
-  let xOffset = 0;
-  let yOffset = 0;
+  let previewLeftOffset = 0;
+  let previewTopOffset = 0;
 
   if (viewRatio < frameRatio) {
-    previewHeight = viewHeight;
-    previewWidth = viewHeight * frameRatio;
-    xOffset = (viewWidth - previewWidth) / 2;
-  } else {
+    // In contain mode, if the view ratio is narrower than the frame ratio,
+    // the preview fits the container width, and the height scales down.
     previewWidth = viewWidth;
     previewHeight = viewWidth / frameRatio;
-    yOffset = (viewHeight - previewHeight) / 2;
+    previewTopOffset = (viewHeight - previewHeight) / 2;
+  } else {
+    // If the view ratio is wider, the preview fits the container height,
+    // and the width scales down.
+    previewHeight = viewHeight;
+    previewWidth = viewHeight * frameRatio;
+    previewLeftOffset = (viewWidth - previewWidth) / 2;
   }
 
   // Debug log every 1000ms
   const lastLogRef = React.useRef(0);
   const now = Date.now();
-  const scale = previewWidth / 256;
-  const cropYOffset = (previewHeight - previewWidth) / 2;
+
+  // contain-mode parameters: 9:16 frame scaled into 256x256 results in a 144x256 region
+  // with 56px horizontal pillarbox padding on both the left and right.
+  const scale = previewHeight / 256;
+  const leftPadding = 56;
+  const effectiveModelWidth = 144;
+  const cropYOffset = 0; // contain-mode spans the full height, so no vertical crop exists
 
   if (now - lastLogRef.current > 1000) {
     lastLogRef.current = now;
-    console.log('[GEOMETRY DEBUG] details:', JSON.stringify({
-      frameWidth,
-      frameHeight,
-      viewWidth,
-      viewHeight,
-      effectiveFrameWidth,
-      effectiveFrameHeight,
-      previewWidth,
-      previewHeight,
-      xOffset,
-      yOffset,
-      isFrontCamera,
-      scale,
-      cropYOffset,
-    }, null, 2));
 
     const nose = landmarks[0];
-    const leftShoulder = landmarks[11];
-    const rightShoulder = landmarks[12];
-    if (nose && leftShoulder && rightShoulder) {
-      const noseXScreen = nose.x * scale + xOffset;
-      const noseYScreen = nose.y * scale + cropYOffset + yOffset;
-      const leftShXScreen = leftShoulder.x * scale + xOffset;
-      const leftShYScreen = leftShoulder.y * scale + cropYOffset + yOffset;
-      const rightShXScreen = rightShoulder.x * scale + xOffset;
-      const rightShYScreen = rightShoulder.y * scale + cropYOffset + yOffset;
+    if (nose) {
+      const noseXScreen = (nose.x - leftPadding) * scale + previewLeftOffset;
+      const noseYScreen = nose.y * scale + previewTopOffset;
+      const finalXScreen = isFrontCamera ? (viewWidth - noseXScreen) : noseXScreen;
+      const finalYScreen = noseYScreen;
+      const finalRenderedLeft = finalXScreen - JOINT_RADIUS;
+      const finalRenderedTop = finalYScreen - JOINT_RADIUS;
 
-      console.log('[GEOMETRY DEBUG] transformed coordinates:', JSON.stringify({
-        nose: {
-          x_model: nose.x,
-          y_model: nose.y,
-          x_screen: noseXScreen,
-          y_screen: noseYScreen,
-          left_position: isFrontCamera ? (viewWidth - noseXScreen) : noseXScreen,
-        },
-        leftShoulder: {
-          x_model: leftShoulder.x,
-          y_model: leftShoulder.y,
-          x_screen: leftShXScreen,
-          y_screen: leftShYScreen,
-          left_position: isFrontCamera ? (viewWidth - leftShXScreen) : leftShXScreen,
-        },
-        rightShoulder: {
-          x_model: rightShoulder.x,
-          y_model: rightShoulder.y,
-          x_screen: rightShXScreen,
-          y_screen: rightShYScreen,
-          left_position: isFrontCamera ? (viewWidth - rightShXScreen) : rightShXScreen,
-        }
-      }, null, 2));
+      console.log('=== END-TO-END NOSE PROJECTION VERIFICATION ===');
+      console.log(`Camera Frame: ${frameWidth}x${frameHeight}`);
+      console.log(`Resizer Output: 256x256`);
+      console.log(`Raw outputs[0] nose (same as parsed): x=${nose.x.toFixed(5)}, y=${nose.y.toFixed(5)}, z=${nose.z.toFixed(5)}, vis=${nose.visibility.toFixed(5)}, pres=${nose.presence.toFixed(5)}`);
+      console.log(`Parsed Landmark nose: x=${nose.x.toFixed(5)}, y=${nose.y.toFixed(5)}, z=${nose.z.toFixed(5)}, vis=${nose.visibility.toFixed(5)}, pres=${nose.presence.toFixed(5)}`);
+      console.log('Screen Coordinate Calculation:');
+      console.log(`  raw x: ${nose.x.toFixed(5)}`);
+      console.log(`  raw y: ${nose.y.toFixed(5)}`);
+      console.log(`  parsed x: ${nose.x.toFixed(5)}`);
+      console.log(`  parsed y: ${nose.y.toFixed(5)}`);
+      console.log(`  scale: ${scale.toFixed(5)}`);
+      console.log(`  previewWidth: ${previewWidth.toFixed(5)}`);
+      console.log(`  previewHeight: ${previewHeight.toFixed(5)}`);
+      console.log(`  previewTopOffset: ${previewTopOffset.toFixed(5)}`);
+      console.log(`  previewLeftOffset: ${previewLeftOffset.toFixed(5)}`);
+      console.log(`  xOffset (previewLeftOffset): ${previewLeftOffset.toFixed(5)}`);
+      console.log(`  yOffset (previewTopOffset): ${previewTopOffset.toFixed(5)}`);
+      console.log(`  leftPadding: ${leftPadding}`);
+      console.log(`  mirror calculation (isFrontCamera = ${isFrontCamera}): isFrontCamera ? (viewWidth - noseXScreen) : noseXScreen`);
+      console.log(`  final xScreen (pre-mirroring): ${noseXScreen.toFixed(5)}`);
+      console.log(`  final yScreen: ${noseYScreen.toFixed(5)}`);
+      console.log(`  final rendered left: ${finalRenderedLeft.toFixed(5)}`);
+      console.log(`  final rendered top: ${finalRenderedTop.toFixed(5)}`);
+      console.log('================================================');
     }
   }
 
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {landmarks.map((lm) => {
-        const xScreen = lm.x * scale + xOffset;
-        const yScreen = lm.y * scale + cropYOffset + yOffset;
-        const leftPosition = isFrontCamera ? (viewWidth - xScreen) : xScreen;
+  // Pre-calculate transformed screen-space coordinates for lookup
+  const coords = landmarks.reduce((acc, lm) => {
+    const xScreen = (lm.x - leftPadding) * scale + previewLeftOffset;
+    const yScreen = lm.y * scale + previewTopOffset;
+    const xFinal = isFrontCamera ? (viewWidth - xScreen) : xScreen;
+    acc[lm.index] = { x: xFinal, y: yScreen };
+    return acc;
+  }, {} as Record<number, { x: number; y: number }>);
 
+  return (
+    <View style={[StyleSheet.absoluteFill, { borderColor: 'blue', borderWidth: 2 }]} pointerEvents="none">
+      {/* Draw temporary diagnostic bone connections first (below joints) */}
+      {BONE_CONNECTIONS.map(([idx1, idx2]) => {
+        const p1 = coords[idx1];
+        const p2 = coords[idx2];
+        if (p1 && p2) {
+          return renderBone(`bone-${idx1}-${idx2}`, p1.x, p1.y, p2.x, p2.y);
+        }
+        return null;
+      })}
+
+      {/* Draw landmark joint dots */}
+      {landmarks.map((lm) => {
+        const p = coords[lm.index];
+        if (!p) return null;
         return (
           <View
             key={lm.index}
             style={[
               styles.joint,
               {
-                // Center the circle on the landmark position
-                left: leftPosition - JOINT_RADIUS,
-                top: yScreen - JOINT_RADIUS,
+                left: p.x - JOINT_RADIUS,
+                top: p.y - JOINT_RADIUS,
               },
             ]}
           />

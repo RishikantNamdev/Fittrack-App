@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { LayoutChangeEvent, StyleSheet, Text, View, Button, Linking, ActivityIndicator } from 'react-native';
+import { LayoutChangeEvent, StyleSheet, Text, View, Button, Linking, ActivityIndicator, Image as RNImage } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission, useFrameOutput } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { createResizer } from 'react-native-vision-camera-resizer';
@@ -8,6 +8,37 @@ import { runOnJS } from 'react-native-worklets';
 import { parsePoseLandmarks } from '../../pose/parseLandmarks';
 import type { PoseFrame, PoseLandmark } from '../../pose/PoseLandmark';
 import { SkeletonOverlay } from './SkeletonOverlay';
+import { POSE_TEST_IMAGE_BASE64, POSE_TEST_IMAGE_METADATA } from './poseTestData';
+
+declare let global: any;
+
+function base64ToUint8Array(base64Str: string): Uint8Array {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) {
+    lookup[chars.charCodeAt(i)] = i;
+  }
+  const len = base64Str.length;
+  let bufferLength = len * 0.75;
+  if (base64Str[len - 1] === '=') {
+    bufferLength--;
+    if (base64Str[len - 2] === '=') {
+      bufferLength--;
+    }
+  }
+  const bytes = new Uint8Array(bufferLength);
+  let p = 0;
+  for (let i = 0; i < len; i += 4) {
+    const encoded1 = lookup[base64Str.charCodeAt(i)];
+    const encoded2 = lookup[base64Str.charCodeAt(i + 1)];
+    const encoded3 = lookup[base64Str.charCodeAt(i + 2)];
+    const encoded4 = lookup[base64Str.charCodeAt(i + 3)];
+    bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);
+    if (p < bufferLength) bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+    if (p < bufferLength) bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);
+  }
+  return bytes;
+}
 
 // ---------------------------------------------------------------------------
 // Landmark indices logged during validation. Chosen to cover the full body:
@@ -42,6 +73,8 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
    * runOnJS. Updated on every inference frame. Drives SkeletonOverlay renders.
    */
   const [landmarks, setLandmarks] = useState<PoseLandmark[]>([]);
+  const [staticTestMode, setStaticTestMode] = useState(false);
+  const [staticLandmarks, setStaticLandmarks] = useState<PoseLandmark[]>([]);
 
   /**
    * Camera container dimensions, measured once via the container's onLayout
@@ -92,7 +125,7 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
           height: 256,
           channelOrder: 'rgb',
           dataType: 'float32',
-          scaleMode: 'cover',
+          scaleMode: 'contain',
           pixelLayout: 'interleaved',
         });
         if (active) {
@@ -127,6 +160,40 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
       console.log('[TFLite Model] Output tensor shapes:', JSON.stringify(actualModel.outputs));
     }
   }, [actualModel]);
+
+  // Run standalone static inference when test mode is activated
+  useEffect(() => {
+    if (staticTestMode && actualModel != null) {
+      try {
+        console.log('[Static Test] Running standalone static inference...');
+        const bytes = base64ToUint8Array(POSE_TEST_IMAGE_BASE64);
+        const inputBuffer = bytes.buffer;
+
+        const start = Date.now();
+        const outputs = actualModel.runSync([inputBuffer]);
+        const end = Date.now();
+        console.log(`[Static Test] Inference completed in ${end - start}ms`);
+
+        const data0 = new Float32Array(outputs[0]);
+        const data1 = new Float32Array(outputs[1]);
+
+        const poseFrame = parsePoseLandmarks(data0, data1[0], start);
+        console.log('[Static Test] Pose score:', poseFrame.poseScore);
+        
+        console.log('[Static Test] Nose landmark (idx 0):', JSON.stringify(poseFrame.landmarks[0]));
+        console.log('[Static Test] Left Shoulder (idx 11):', JSON.stringify(poseFrame.landmarks[11]));
+        console.log('[Static Test] Right Shoulder (idx 12):', JSON.stringify(poseFrame.landmarks[12]));
+        console.log('[Static Test] Left Hip (idx 23):', JSON.stringify(poseFrame.landmarks[23]));
+        console.log('[Static Test] Right Hip (idx 24):', JSON.stringify(poseFrame.landmarks[24]));
+        console.log('[Static Test] Left Knee (idx 25):', JSON.stringify(poseFrame.landmarks[25]));
+        console.log('[Static Test] Right Knee (idx 26):', JSON.stringify(poseFrame.landmarks[26]));
+
+        setStaticLandmarks(poseFrame.landmarks);
+      } catch (err: any) {
+        console.error('[Static Test] Error running static inference:', err);
+      }
+    }
+  }, [staticTestMode, actualModel]);
 
   console.log('[PoseCamera] render: hasPermission =', hasPermission, 'status =', status, 'device =', device != null, 'modelState =', model.state, 'resizer =', resizer != null);
 
@@ -186,7 +253,6 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
 
         // 2. Extract input pixel buffer
         const inputBuffer = resized.getPixelBuffer();
-
         // 3. Synchronous inference on the worklet thread
         const outputs = tflite.runSync([inputBuffer]);
 
@@ -288,11 +354,39 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
     );
   }
 
+  if (staticTestMode) {
+    return (
+      <View style={styles.cameraContainer} onLayout={handleLayout}>
+        <RNImage
+          source={require('../../../assets/human-pose.jpg')}
+          style={StyleSheet.absoluteFill}
+          resizeMode="contain"
+        />
+        <SkeletonOverlay
+          landmarks={staticLandmarks}
+          viewWidth={viewWidth}
+          viewHeight={viewHeight}
+          frameWidth={POSE_TEST_IMAGE_METADATA.originalWidth}
+          frameHeight={POSE_TEST_IMAGE_METADATA.originalHeight}
+          isFrontCamera={false}
+        />
+        <View style={{ position: 'absolute', top: 50, left: 10, right: 10, zIndex: 999 }}>
+          <Button
+            title="Switch to Live Camera"
+            onPress={() => setStaticTestMode(false)}
+            color="#ef4444"
+          />
+        </View>
+      </View>
+    );
+  }
+
   // Active camera preview with landmark overlay (Milestone 3A)
   return (
     <View style={styles.cameraContainer} onLayout={handleLayout}>
       <Camera
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { borderColor: 'red', borderWidth: 2 }]}
+        resizeMode="contain"
         device={device}
         isActive={isActive}
         onError={(error) => console.error('VisionCamera Error:', error)}
@@ -308,6 +402,13 @@ export function PoseCamera({ isActive }: PoseCameraProps) {
         frameHeight={frameHeight}
         isFrontCamera={isFrontCamera}
       />
+      <View style={{ position: 'absolute', top: 50, left: 10, right: 10, zIndex: 999 }}>
+        <Button
+          title="Switch to Static Test"
+          onPress={() => setStaticTestMode(true)}
+          color="#6366F1"
+        />
+      </View>
     </View>
   );
 }
